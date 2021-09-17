@@ -15,7 +15,8 @@ import (
 
 // SimpleService ...
 type SimpleService interface {
-	Start() (err error)
+	Start() (err error)                                                                           // Start service
+	SetTimeouts(writeTimeout time.Duration, readTimeout time.Duration, idleTimeout time.Duration) // set timeouts. 0 will use default values. It must be called before start
 }
 
 // SimpleServiceObject ...
@@ -24,7 +25,12 @@ type SimpleServiceObject interface {
 
 // NewSimpleService creates new simple service object
 func NewSimpleService(obj SimpleServiceObject) SimpleService {
-	return &SimpleServiceBase{obj: obj}
+	return &SimpleServiceBase{
+		obj:          obj,
+		writeTimeout: time.Second * 15,
+		readTimeout:  time.Second * 15,
+		idleTimeout:  time.Second * 60,
+	}
 }
 
 // SimpleServiceGetHTTPHandler ...
@@ -44,7 +50,10 @@ type SimpleServiceBeforeStart interface {
 
 // SimpleServiceBase ...
 type SimpleServiceBase struct {
-	obj SimpleServiceObject
+	obj          SimpleServiceObject
+	writeTimeout time.Duration
+	readTimeout  time.Duration
+	idleTimeout  time.Duration
 }
 
 var logger *logrus.Entry
@@ -129,9 +138,9 @@ func (s *SimpleServiceBase) Start() (err error) {
 	srv := &http.Server{
 		Addr: viper.GetString("listen_address"),
 		// Good practice to set timeouts to avoid Slowloris attacks.
-		WriteTimeout: time.Second * 15,
-		ReadTimeout:  time.Second * 15,
-		IdleTimeout:  time.Second * 60,
+		WriteTimeout: s.writeTimeout,
+		ReadTimeout:  s.readTimeout,
+		IdleTimeout:  s.idleTimeout,
 		Handler:      handler,
 	}
 
@@ -164,4 +173,17 @@ func (s *SimpleServiceBase) Start() (err error) {
 	logger.Println("Shutting down")
 	os.Exit(0)
 	return
+}
+
+func (s *SimpleServiceBase) SetTimeouts(writeTimeout time.Duration, readTimeout time.Duration, idleTimeout time.Duration) {
+
+	if writeTimeout > 0 {
+		s.writeTimeout = writeTimeout
+	}
+	if readTimeout > 0 {
+		s.readTimeout = readTimeout
+	}
+	if idleTimeout > 0 {
+		s.idleTimeout = idleTimeout
+	}
 }
