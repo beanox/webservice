@@ -48,6 +48,11 @@ type SimpleServiceBeforeStart interface {
 	BeforeStart() (err error)
 }
 
+// SimpleServiceBeforeEnd ...
+type SimpleServiceBeforeEnd interface {
+	BeforeEnd()
+}
+
 // SimpleServiceBase ...
 type SimpleServiceBase struct {
 	obj          SimpleServiceObject
@@ -146,7 +151,9 @@ func (s *SimpleServiceBase) Start() (err error) {
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {
-			logger.Fatal(err)
+			if err != http.ErrServerClosed {
+				logger.Fatal(err)
+			}
 		}
 	}()
 
@@ -160,6 +167,10 @@ func (s *SimpleServiceBase) Start() (err error) {
 	<-c
 
 	logger.Print("Received request for shutdown")
+
+	if beforeEnd, ok := s.obj.(SimpleServiceBeforeEnd); ok {
+		beforeEnd.BeforeEnd()
+	}
 
 	// Create a deadline to wait for.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
