@@ -266,6 +266,11 @@ func New(options Options) (a *Authorization) {
 		a.requiredScope = "*"
 	}
 
+	if a.disabled {
+		a.jwks = nil
+		a.jwksURL = ""
+	}
+
 	if a.jwks == nil && a.jwksURL != "" {
 		a.autoRefresh = jwk.NewAutoRefresh(context.TODO())
 		a.autoRefresh.Configure(a.jwksURL)
