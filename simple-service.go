@@ -134,6 +134,7 @@ func (s *SimpleServiceBase) Start() (err error) {
 	if getHTTPHandler, ok := s.obj.(SimpleServiceGetHTTPHandler); ok {
 		handler, err = getHTTPHandler.GetHTTPHandler()
 		if err != nil {
+			logger.WithError(err).Errorf("unable to start service")
 			return
 		}
 	} else {
