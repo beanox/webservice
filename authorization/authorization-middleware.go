@@ -190,7 +190,7 @@ func (a *Authorization) Middleware(h http.Handler) (handler http.Handler) {
 								}
 							}
 
-							if uid != "" && mail != "" {
+							if uid != "" {
 								userInfo = &UserInfo{
 									UserID: uid,
 									Email:  mail,
