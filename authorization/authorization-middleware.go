@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/beanox/webservice"
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/spf13/viper"
 
-	"github.com/dgrijalva/jwt-go"
 	"github.com/lestrrat-go/jwx/jwk"
 	"github.com/sirupsen/logrus"
 )
