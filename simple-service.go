@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -104,6 +105,22 @@ func (s *SimpleServiceBase) Start() (err error) {
 	logger = logrus.WithField("facility", "microservice")
 
 	err = viper.ReadInConfig()
+
+	// Convert all environment variables with JSON_VAR_ prefix into configuration
+	// E.g. JSON_VAR_={USER:MyUser, PASS:MyPass} -> db.user=MyUser; db.pass=MyPass
+	const jsonMergePrefix = "JSON_VAR_"
+	envVars := os.Environ()
+	for _, envContent := range envVars {
+		if strings.HasPrefix(envContent, jsonMergePrefix) && len(jsonMergePrefix) > 5 {
+			variable := strings.Split(envContent, "=")
+			configName := variable[0]
+
+			mergeErr := mergeEnvJsonInConfig(configName, configName[len(jsonMergePrefix):])
+			if mergeErr != nil {
+				logrus.WithError(mergeErr).WithField("var", configName).Warn("error merging env variable in config")
+			}
+		}
+	}
 
 	if err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {

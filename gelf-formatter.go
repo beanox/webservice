@@ -46,7 +46,7 @@ func (f *GelfFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 
 	serialized, err := json.Marshal(data)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to marshal fields to JSON, %v", err)
+		return nil, fmt.Errorf("failed to marshal fields to JSON, %v", err)
 	}
 
 	return append(serialized, '\n'), nil
