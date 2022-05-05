@@ -1,4 +1,4 @@
-package webservice
+package servererror
 
 // ServerErrorData is custom error that should be used to describe better errors
 type ServerErrorData struct {

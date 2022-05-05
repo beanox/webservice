@@ -2,13 +2,18 @@ package webservice
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"time"
 
+	"github.com/beanox/webservice/authorization"
+	"github.com/beanox/webservice/logging"
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/rs/cors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -34,9 +39,14 @@ func NewSimpleService(obj SimpleServiceObject) SimpleService {
 	}
 }
 
-// SimpleServiceGetHTTPHandler ...
-type SimpleServiceGetHTTPHandler interface {
+// SimpleServiceGetHTTPHandlerObsolete ...
+type SimpleServiceGetHTTPHandlerObsolete interface {
 	GetHTTPHandler() (handler http.Handler, err error)
+}
+
+// ConfigureRouterHandler ...
+type ConfigureRouterHandler interface {
+	ConfigureRouter(router *mux.Router) (handler http.Handler, err error)
 }
 
 // SimpleServicePreparePFlags ...
@@ -54,6 +64,11 @@ type SimpleServiceBeforeEnd interface {
 	BeforeEnd()
 }
 
+// SimpleServiceGetStatusHandler ...
+type SimpleServiceGetStatusHandler interface {
+	GetServerStatus() (status interface{})
+}
+
 // SimpleServiceBase ...
 type SimpleServiceBase struct {
 	obj          SimpleServiceObject
@@ -61,8 +76,6 @@ type SimpleServiceBase struct {
 	readTimeout  time.Duration
 	idleTimeout  time.Duration
 }
-
-var logger *logrus.Entry
 
 // Start starts service
 func (s *SimpleServiceBase) Start() (err error) {
@@ -76,6 +89,8 @@ func (s *SimpleServiceBase) Start() (err error) {
 
 	pflag.String("log_level", "warning", "Log level")
 	pflag.String("listen_address", ":8080", "Listen address")
+	pflag.Bool("cors.enabled", false, "Enable cors")
+	pflag.String("strip_path", "/", "Strip path from requests (e.g. /api -> http://my.server.com/api/request -> /request)")
 
 	if preparePFlags, ok := s.obj.(SimpleServicePreparePFlags); ok {
 		err = preparePFlags.PreparePFlags()
@@ -83,12 +98,14 @@ func (s *SimpleServiceBase) Start() (err error) {
 			return
 		}
 	}
-
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	pflag.Parse()
 	viper.BindPFlags(pflag.CommandLine)
 
-	logFormat, logFormatDefined := os.LookupEnv("LOG_FORMAT")
-	if logFormatDefined {
+	err = viper.ReadInConfig()
+
+	logFormat := viper.GetString("log_format")
+	if logFormat != "" {
 		if logFormat == "json" {
 			logrus.SetFormatter(&logrus.JSONFormatter{})
 		} else if logFormat == "color" {
@@ -101,10 +118,6 @@ func (s *SimpleServiceBase) Start() (err error) {
 			logrus.SetFormatter(&GelfFormatter{host: host})
 		}
 	}
-
-	logger = logrus.WithField("facility", "microservice")
-
-	err = viper.ReadInConfig()
 
 	// Convert all environment variables with JSON_VAR_ prefix into configuration
 	// E.g. JSON_VAR_={USER:MyUser, PASS:MyPass} -> db.user=MyUser; db.pass=MyPass
@@ -124,20 +137,19 @@ func (s *SimpleServiceBase) Start() (err error) {
 
 	if err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			logger.WithError(err).Print("No config file is loaded. Using all default values")
+			logrus.WithError(err).Print("No config file is loaded. Using all default values")
 			err = nil
 		} else {
-			logger.WithError(err).Error("Unable to load config")
+			logrus.WithError(err).Error("Unable to load config")
 			return
 		}
 	} else {
-		logger.WithField("config_file", viper.ConfigFileUsed()).Printf("Using config file")
+		logrus.WithField("config_file", viper.ConfigFileUsed()).Printf("Using config file")
 	}
 
 	logLevel, err := logrus.ParseLevel(viper.GetString("log_level"))
-	logger.WithField("log_level", logLevel).Print("Log level set")
+	logrus.WithField("log_level", logLevel).Print("Log level set")
 	logrus.SetLevel(logLevel)
-	logger.Logger.SetLevel(logLevel)
 
 	if beforeStart, ok := s.obj.(SimpleServiceBeforeStart); ok {
 		err = beforeStart.BeforeStart()
@@ -148,14 +160,82 @@ func (s *SimpleServiceBase) Start() (err error) {
 
 	var handler http.Handler
 
-	if getHTTPHandler, ok := s.obj.(SimpleServiceGetHTTPHandler); ok {
-		handler, err = getHTTPHandler.GetHTTPHandler()
+	router := mux.NewRouter()
+	stripPath := viper.GetString("strip_path")
+	if stripPath != "" && stripPath != "/" {
+		router = router.PathPrefix(stripPath).Subrouter()
+	}
+
+	if _, ok := s.obj.(SimpleServiceGetHTTPHandlerObsolete); ok {
+		logrus.Fatal("using obsolete version of GetHTTPHandler - new definition is: ConfigureRouter(router *mux.Router) (handler http.Handler, err error) ")
+	}
+
+	if getServerStatusHandler, ok := s.obj.(SimpleServiceGetStatusHandler); ok {
+		router.Handle("/status", AppHandler(func(w http.ResponseWriter, r *http.Request) error {
+			return json.NewEncoder(w).Encode(getServerStatusHandler.GetServerStatus())
+		})).Methods("GET")
+	} else {
+		router.Handle("/status", AppHandler(func(w http.ResponseWriter, r *http.Request) error {
+			return json.NewEncoder(w).Encode(NewServerStatus())
+		})).Methods("GET")
+	}
+
+	if getHTTPHandler, ok := s.obj.(ConfigureRouterHandler); ok {
+		handler, err = getHTTPHandler.ConfigureRouter(router)
 		if err != nil {
-			logger.WithError(err).Errorf("unable to start service")
+			logrus.WithError(err).Errorf("unable to start service")
 			return
 		}
 	} else {
-		handler = mux.NewRouter()
+		handler = router
+	}
+
+	// Prometheus metrics
+	disablePrometheus := viper.GetBool("disable_prometheus_metrics")
+	if !disablePrometheus {
+		router.Handle("/metrics", promhttp.Handler()).Methods("GET")
+	}
+
+	enableCors := viper.GetBool("cors.enabled")
+
+	if enableCors {
+
+		corsOrigins := viper.GetStringSlice("cors.allowed_origins")
+		if len(corsOrigins) == 0 {
+			corsOrigins = []string{"*"}
+			logrus.Warnf("cors are enable for all domains")
+		}
+
+		corsHeaders := viper.GetStringSlice("cors.allowed_headers")
+		if len(corsHeaders) == 0 {
+			corsHeaders = []string{"*"}
+		}
+
+		corsMethods := viper.GetStringSlice("cors.allowed_methods")
+		if len(corsMethods) == 0 {
+			corsMethods = []string{"HEAD", "GET", "POST", "PUT", "DELETE"}
+		}
+
+		c := cors.New(cors.Options{
+			AllowedOrigins:   corsOrigins,
+			AllowedHeaders:   corsHeaders,
+			AllowedMethods:   corsMethods,
+			AllowCredentials: true,
+			Debug:            false,
+		})
+		handler = c.Handler(handler)
+	}
+
+	// Add logger
+	handler = logging.New(logrus.WithField("facility", "webservice")).Middleware(handler)
+
+	// Authorization
+	authMw := authorization.New(authorization.OptionsFromViper("authorization."))
+	handler = authMw.Middleware(handler)
+	err = authMw.Validate()
+	if err != nil {
+		logrus.WithError(err).Errorf("unable to validate authorization settings")
+		return
 	}
 
 	srv := &http.Server{
@@ -170,7 +250,7 @@ func (s *SimpleServiceBase) Start() (err error) {
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {
 			if err != http.ErrServerClosed {
-				logger.Fatal(err)
+				logrus.Fatal(err)
 			}
 		}
 	}()
@@ -180,11 +260,11 @@ func (s *SimpleServiceBase) Start() (err error) {
 	// SIGKILL, SIGQUIT or SIGTERM (Ctrl+/) will not be caught.
 	signal.Notify(c, os.Interrupt)
 
-	logger.WithField("addr", srv.Addr).Print("Service is ready for requests")
+	logrus.WithField("addr", srv.Addr).Print("Service is ready for requests")
 	// Block until we receive our signal.
 	<-c
 
-	logger.Print("Received request for shutdown")
+	logrus.Print("Received request for shutdown")
 
 	if beforeEnd, ok := s.obj.(SimpleServiceBeforeEnd); ok {
 		beforeEnd.BeforeEnd()
@@ -199,7 +279,7 @@ func (s *SimpleServiceBase) Start() (err error) {
 	// Optionally, you could run srv.Shutdown in a goroutine and block on
 	// <-ctx.Done() if your application should wait for other services
 	// to finalize based on context cancellation.
-	logger.Println("Shutting down")
+	logrus.Println("Shutting down")
 	os.Exit(0)
 	return
 }

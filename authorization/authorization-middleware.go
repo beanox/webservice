@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/beanox/webservice"
+	"github.com/beanox/webservice/servererror"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/spf13/viper"
 
@@ -53,8 +53,8 @@ func (ah AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	a, ok := r.Context().Value(contextTypeAuthorizationMiddleware).(*Authorization)
 	if !ok || a == nil {
-		err = webservice.ServerError(nil, http.StatusInternalServerError, "Authorization info not available")
-		webservice.ProcessHTTPError(err, w, r)
+		err = servererror.ServerError(nil, http.StatusInternalServerError, "Authorization info not available")
+		servererror.ProcessHTTPError(err, w, r)
 		return
 	}
 
@@ -64,8 +64,8 @@ func (ah AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var ok bool
 		userInfo, ok = r.Context().Value(contextTypeUserInfo).(*UserInfo)
 		if (!ok || userInfo == nil) && !a.allowAnonymous {
-			err = webservice.ServerError(nil, http.StatusInternalServerError, "Unable to get user info")
-			webservice.ProcessHTTPError(err, w, r)
+			err = servererror.ServerError(nil, http.StatusInternalServerError, "Unable to get user info")
+			servererror.ProcessHTTPError(err, w, r)
 			return
 		}
 		unauthorized := false
@@ -85,21 +85,21 @@ func (ah AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if a.invalidScopeIsAnonymous {
 				userInfo = nil
 			} else {
-				err = webservice.ServerError(nil, http.StatusForbidden, "Forbidden")
-				webservice.ProcessHTTPError(err, w, r)
+				err = servererror.ServerError(nil, http.StatusForbidden, "Forbidden")
+				servererror.ProcessHTTPError(err, w, r)
 				return
 			}
 		}
 
 		if unauthorized {
-			err = webservice.ServerError(nil, http.StatusUnauthorized, "Unauthorized")
-			webservice.ProcessHTTPError(err, w, r)
+			err = servererror.ServerError(nil, http.StatusUnauthorized, "Unauthorized")
+			servererror.ProcessHTTPError(err, w, r)
 			return
 		}
 	}
 
 	err = ah(w, r, userInfo)
-	webservice.ProcessHTTPError(err, w, r)
+	servererror.ProcessHTTPError(err, w, r)
 }
 
 // Authorization object
@@ -239,14 +239,14 @@ type Options struct {
 	Disabled bool
 }
 
-func OptionsFromViper(v *viper.Viper) (options Options) {
+func OptionsFromViper(prefix string) (options Options) {
 	return Options{
-		JwksURL:                 v.GetString("jwks"),
-		Disabled:                v.GetBool("disabled"),
-		RequiredScope:           v.GetString("scope"),
-		AllowAnonymous:          v.GetBool("allow_anonymous"),
-		InvalidTokenIsAnonymous: v.GetBool("invalid_token_is_anonymous"),
-		InvalidScopeIsAnonymous: v.GetBool("invalid_scope_is_anonymous"),
+		JwksURL:                 viper.GetString(prefix + "jwks"),
+		Disabled:                viper.GetBool(prefix + "disabled"),
+		RequiredScope:           viper.GetString(prefix + "scope"),
+		AllowAnonymous:          viper.GetBool(prefix + "allow_anonymous"),
+		InvalidTokenIsAnonymous: viper.GetBool(prefix + "invalid_token_is_anonymous"),
+		InvalidScopeIsAnonymous: viper.GetBool(prefix + "invalid_scope_is_anonymous"),
 	}
 }
 
