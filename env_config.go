@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-func mergeEnvJsonInConfig(envName string, configName string) (err error) {
+func MergeEnvJsonInConfig(envName string, configName string) (err error) {
 	if envName == configName {
 		err = fmt.Errorf("environment name is not allowed to be the same as configuration name")
 		return

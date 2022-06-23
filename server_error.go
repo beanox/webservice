@@ -1,12 +1,12 @@
-package servererror
+package webservice
 
 // ServerErrorData is custom error that should be used to describe better errors
 type ServerErrorData struct {
-	Parent      error  `json:"-"`
-	Code        int    `json:"code,omitempty"`
-	Message     string `json:"message,omitempty"`
-	Description string `json:"description,omitempty"`
-	Stack       string `json:"-"`
+	Parent       error  `json:"-"`
+	Code         int    `json:"code,omitempty"`
+	Message      string `json:"message,omitempty"`
+	Description  string `json:"description,omitempty"`
+	FunctionInfo string `json:"-"`
 }
 
 // ServerErrorWithText extra text
@@ -27,6 +27,16 @@ func (e *ServerErrorData) Error() string {
 
 // ServerError Create error object
 func ServerError(Parent error, Code int, Message string) *ServerErrorData {
+	e := new(ServerErrorData)
+	e.Parent = Parent
+	e.Code = Code
+	e.Message = Message
+	e.FunctionInfo = getCurrentFunctionInfo(1)
+	return e
+}
+
+// ServerError Create error object
+func ServerErrorWithoutStack(Parent error, Code int, Message string) *ServerErrorData {
 	e := new(ServerErrorData)
 	e.Parent = Parent
 	e.Code = Code
