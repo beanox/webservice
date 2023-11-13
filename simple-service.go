@@ -216,12 +216,15 @@ func (s *SimpleServiceBase) Start() (err error) {
 			corsMethods = []string{"HEAD", "GET", "POST", "PUT", "DELETE"}
 		}
 
+		corsMaxAge := viper.GetInt("cors.max_age")
+
 		c := cors.New(cors.Options{
 			AllowedOrigins:   corsOrigins,
 			AllowedHeaders:   corsHeaders,
 			AllowedMethods:   corsMethods,
 			AllowCredentials: true,
 			Debug:            false,
+			MaxAge:           corsMaxAge,
 		})
 		handler = c.Handler(handler)
 	}
