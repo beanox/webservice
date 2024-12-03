@@ -9,10 +9,11 @@ import (
 // ServerStatus return actual state and process data
 // so you can test with url/state the correct installation of microservice
 type ServerStatus struct {
-	Running   bool   `json:"running"`
-	Process   string `json:"process"`
-	Pid       int    `json:"pid"`
-	StripPath string `json:"strip_path"`
+	Running   bool   `json:"running,omitempty"`
+	Process   string `json:"process,omitempty"`
+	Pid       int    `json:"pid,omitempty"`
+	StripPath string `json:"strip_path,omitempty"`
+	JwksURL   string `json:"jwks_url,omitempty"`
 }
 
 // NewServerStatus create default service status
@@ -22,5 +23,6 @@ func NewServerStatus() *ServerStatus {
 		Process:   os.Args[0],
 		Pid:       os.Getpid(),
 		StripPath: viper.GetString("strip_path"),
+		JwksURL:   viper.GetString("authorization.jwks"),
 	}
 }

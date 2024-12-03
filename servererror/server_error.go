@@ -1,5 +1,7 @@
 package servererror
 
+import "runtime/debug"
+
 // ServerErrorData is custom error that should be used to describe better errors
 type ServerErrorData struct {
 	Parent      error  `json:"-"`
@@ -31,5 +33,6 @@ func ServerError(Parent error, Code int, Message string) *ServerErrorData {
 	e.Parent = Parent
 	e.Code = Code
 	e.Message = Message
+	e.Stack = string(debug.Stack())
 	return e
 }
