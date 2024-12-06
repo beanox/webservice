@@ -13,6 +13,6 @@ func main() {
 }
 
 // New creates App instance
-func New() webservice.SimpleService {
-	return webservice.NewSimpleService(&testService{})
+func New() webservice.WebService {
+	return webservice.New(&testService{})
 }

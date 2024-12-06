@@ -14,15 +14,17 @@ type ServerStatus struct {
 	Pid       int    `json:"pid,omitempty"`
 	StripPath string `json:"strip_path,omitempty"`
 	JwksURL   string `json:"jwks_url,omitempty"`
+	BuildInfo
 }
 
 // NewServerStatus create default service status
-func NewServerStatus() *ServerStatus {
+func NewServerStatus(bi BuildInfo) *ServerStatus {
 	return &ServerStatus{
 		Running:   true,
 		Process:   os.Args[0],
 		Pid:       os.Getpid(),
 		StripPath: viper.GetString("strip_path"),
 		JwksURL:   viper.GetString("authorization.jwks"),
+		BuildInfo: bi,
 	}
 }

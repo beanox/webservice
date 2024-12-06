@@ -3,6 +3,7 @@ package webservice
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,28 +20,121 @@ import (
 	"github.com/spf13/viper"
 )
 
-// SimpleService ...
-type SimpleService interface {
-	Start() (err error)                                                                           // Start service
-	SetTimeouts(writeTimeout time.Duration, readTimeout time.Duration, idleTimeout time.Duration) // set timeouts. 0 will use default values. It must be called before start
+var (
+	Version   string
+	BuildTime string
+	CommitSHA string
+)
+
+// WebService ...
+type WebService interface {
+	Start() (err error) // Start service
 }
 
-// SimpleServiceObject ...
-type SimpleServiceObject interface {
+// WebServiceObject ...
+type WebServiceObject interface {
 }
 
-// NewSimpleService creates new simple service object
-func NewSimpleService(obj SimpleServiceObject) SimpleService {
-	return &SimpleServiceBase{
-		obj:          obj,
-		writeTimeout: time.Second * 15,
-		readTimeout:  time.Second * 15,
-		idleTimeout:  time.Second * 60,
+// BuildInfo represents build information for the service
+type BuildInfo struct {
+	Name      string `json:"name,omitempty"`
+	Version   string `json:"version,omitempty"`
+	BuildTime string `json:"build_time,omitempty"`
+	CommitSHA string `json:"commit_sha,omitempty"`
+}
+
+type Timeouts struct {
+	WriteTimeout time.Duration
+	ReadTimeout  time.Duration
+	IdleTimeout  time.Duration
+}
+
+// Config holds all configuration for WebService
+type Config struct {
+	timeouts  Timeouts
+	buildInfo BuildInfo
+}
+
+// WebServiceOption defines a function type for setting options
+type WebServiceOption func(*Config)
+
+// WithWriteTimeout sets the write timeout
+func WithWriteTimeout(timeout time.Duration) WebServiceOption {
+	return func(c *Config) {
+		c.timeouts.WriteTimeout = timeout
 	}
 }
 
-// SimpleServiceGetHTTPHandlerObsolete ...
-type SimpleServiceGetHTTPHandlerObsolete interface {
+// WithReadTimeout sets the read timeout
+func WithReadTimeout(timeout time.Duration) WebServiceOption {
+	return func(c *Config) {
+		c.timeouts.ReadTimeout = timeout
+	}
+}
+
+// WithIdleTimeout sets the idle timeout
+func WithIdleTimeout(timeout time.Duration) WebServiceOption {
+	return func(c *Config) {
+		c.timeouts.IdleTimeout = timeout
+	}
+}
+
+// WithTimeouts sets all timeout values at once
+func WithTimeouts(write, read, idle time.Duration) WebServiceOption {
+	return func(c *Config) {
+		c.timeouts.WriteTimeout = write
+		c.timeouts.ReadTimeout = read
+		c.timeouts.IdleTimeout = idle
+	}
+}
+
+// WithBuildInfo sets the build information
+func WithBuildInfo(bi BuildInfo) WebServiceOption {
+	return func(c *Config) {
+
+		if bi.Name != "" {
+			c.buildInfo.Name = bi.Name
+		}
+		if bi.Version != "" {
+			c.buildInfo.Version = bi.Version
+		}
+		if bi.BuildTime != "" {
+			c.buildInfo.BuildTime = bi.BuildTime
+		}
+		if bi.CommitSHA != "" {
+			c.buildInfo.CommitSHA = bi.CommitSHA
+		}
+	}
+}
+
+// New creates new web service object
+func New(obj WebServiceObject, options ...WebServiceOption) WebService {
+	config := Config{
+		timeouts: Timeouts{
+			WriteTimeout: time.Second * 15, // default
+			ReadTimeout:  time.Second * 15, // default
+			IdleTimeout:  time.Second * 60, // default
+		},
+		buildInfo: BuildInfo{
+			Version:   Version,
+			BuildTime: BuildTime,
+			CommitSHA: CommitSHA,
+		},
+	}
+
+	// Apply all options
+	for _, opt := range options {
+		opt(&config)
+	}
+
+	return &WebServiceBase{
+		obj:    obj,
+		config: config,
+	}
+}
+
+// WebServiceGetHTTPHandlerObsolete ...
+type WebServiceGetHTTPHandlerObsolete interface {
 	GetHTTPHandler() (handler http.Handler, err error)
 }
 
@@ -49,36 +143,34 @@ type ConfigureRouterHandler interface {
 	ConfigureRouter(router *mux.Router) (handler http.Handler, err error)
 }
 
-// SimpleServicePreparePFlags ...
-type SimpleServicePreparePFlags interface {
+// WebServicePreparePFlags ...
+type WebServicePreparePFlags interface {
 	PreparePFlags() (err error)
 }
 
-// SimpleServiceBeforeStart ...
-type SimpleServiceBeforeStart interface {
+// WebServiceBeforeStart ...
+type WebServiceBeforeStart interface {
 	BeforeStart() (err error)
 }
 
-// SimpleServiceBeforeEnd ...
-type SimpleServiceBeforeEnd interface {
+// WebServiceBeforeEnd ...
+type WebServiceBeforeEnd interface {
 	BeforeEnd()
 }
 
-// SimpleServiceGetStatusHandler ...
-type SimpleServiceGetStatusHandler interface {
+// WebServiceGetStatusHandler ...
+type WebServiceGetStatusHandler interface {
 	GetServerStatus() (status interface{})
 }
 
-// SimpleServiceBase ...
-type SimpleServiceBase struct {
-	obj          SimpleServiceObject
-	writeTimeout time.Duration
-	readTimeout  time.Duration
-	idleTimeout  time.Duration
+// WebServiceBase ...
+type WebServiceBase struct {
+	obj    WebServiceObject
+	config Config
 }
 
 // Start starts service
-func (s *SimpleServiceBase) Start() (err error) {
+func (s *WebServiceBase) Start() (err error) {
 
 	viper.SetDefault("log_level", "warning")
 	viper.SetDefault("listen_address", ":8080")
@@ -92,7 +184,11 @@ func (s *SimpleServiceBase) Start() (err error) {
 	pflag.Bool("cors.enabled", false, "Enable cors")
 	pflag.String("strip_path", "/", "Strip path from requests (e.g. /api -> http://my.server.com/api/request -> /request)")
 
-	if preparePFlags, ok := s.obj.(SimpleServicePreparePFlags); ok {
+	if s.config.buildInfo.Version != "" {
+		pflag.Bool("version", false, "Show current version")
+	}
+
+	if preparePFlags, ok := s.obj.(WebServicePreparePFlags); ok {
 		err = preparePFlags.PreparePFlags()
 		if err != nil {
 			return
@@ -103,6 +199,29 @@ func (s *SimpleServiceBase) Start() (err error) {
 	viper.BindPFlags(pflag.CommandLine)
 
 	err = viper.ReadInConfig()
+
+	if viper.GetBool("version") {
+
+		if s.config.buildInfo.Name != "" {
+			fmt.Println(s.config.buildInfo.Name)
+		}
+
+		if s.config.buildInfo.Version != "" {
+			fmt.Println("  Version    : " + s.config.buildInfo.Version)
+		} else {
+			fmt.Println("  Version    : (unknown)")
+		}
+
+		if s.config.buildInfo.BuildTime != "" {
+			fmt.Println("  Build time : " + s.config.buildInfo.BuildTime)
+		}
+
+		if s.config.buildInfo.CommitSHA != "" {
+			fmt.Println("  Commit SHA : " + s.config.buildInfo.CommitSHA)
+		}
+
+		return
+	}
 
 	logFormat := viper.GetString("log_format")
 	if logFormat != "" {
@@ -151,7 +270,17 @@ func (s *SimpleServiceBase) Start() (err error) {
 	logrus.WithField("log_level", logLevel).Print("Log level set")
 	logrus.SetLevel(logLevel)
 
-	if beforeStart, ok := s.obj.(SimpleServiceBeforeStart); ok {
+	if s.config.buildInfo.Version != "" {
+		logrus.WithField("version", s.config.buildInfo.Version).Info("Version")
+	}
+	if s.config.buildInfo.BuildTime != "" {
+		logrus.WithField("build_time", s.config.buildInfo.BuildTime).Debug("Build time")
+	}
+	if s.config.buildInfo.CommitSHA != "" {
+		logrus.WithField("commit_sha", s.config.buildInfo.CommitSHA).Debug("Commit SHA")
+	}
+
+	if beforeStart, ok := s.obj.(WebServiceBeforeStart); ok {
 		err = beforeStart.BeforeStart()
 		if err != nil {
 			return
@@ -166,17 +295,17 @@ func (s *SimpleServiceBase) Start() (err error) {
 		router = router.PathPrefix(stripPath).Subrouter()
 	}
 
-	if _, ok := s.obj.(SimpleServiceGetHTTPHandlerObsolete); ok {
+	if _, ok := s.obj.(WebServiceGetHTTPHandlerObsolete); ok {
 		logrus.Fatal("using obsolete version of GetHTTPHandler - new definition is: ConfigureRouter(router *mux.Router) (handler http.Handler, err error) ")
 	}
 
-	if getServerStatusHandler, ok := s.obj.(SimpleServiceGetStatusHandler); ok {
+	if getServerStatusHandler, ok := s.obj.(WebServiceGetStatusHandler); ok {
 		router.Handle("/status", AppHandler(func(w http.ResponseWriter, r *http.Request) error {
 			return json.NewEncoder(w).Encode(getServerStatusHandler.GetServerStatus())
 		})).Methods("GET")
 	} else {
 		router.Handle("/status", AppHandler(func(w http.ResponseWriter, r *http.Request) error {
-			return json.NewEncoder(w).Encode(NewServerStatus())
+			return json.NewEncoder(w).Encode(NewServerStatus(s.config.buildInfo))
 		})).Methods("GET")
 	}
 
@@ -244,9 +373,9 @@ func (s *SimpleServiceBase) Start() (err error) {
 	srv := &http.Server{
 		Addr: viper.GetString("listen_address"),
 		// Good practice to set timeouts to avoid Slowloris attacks.
-		WriteTimeout: s.writeTimeout,
-		ReadTimeout:  s.readTimeout,
-		IdleTimeout:  s.idleTimeout,
+		WriteTimeout: s.config.timeouts.WriteTimeout,
+		ReadTimeout:  s.config.timeouts.ReadTimeout,
+		IdleTimeout:  s.config.timeouts.IdleTimeout,
 		Handler:      handler,
 	}
 
@@ -269,7 +398,7 @@ func (s *SimpleServiceBase) Start() (err error) {
 
 	logrus.Print("Received request for shutdown")
 
-	if beforeEnd, ok := s.obj.(SimpleServiceBeforeEnd); ok {
+	if beforeEnd, ok := s.obj.(WebServiceBeforeEnd); ok {
 		beforeEnd.BeforeEnd()
 	}
 
@@ -285,17 +414,4 @@ func (s *SimpleServiceBase) Start() (err error) {
 	logrus.Println("Shutting down")
 	os.Exit(0)
 	return
-}
-
-func (s *SimpleServiceBase) SetTimeouts(writeTimeout time.Duration, readTimeout time.Duration, idleTimeout time.Duration) {
-
-	if writeTimeout > 0 {
-		s.writeTimeout = writeTimeout
-	}
-	if readTimeout > 0 {
-		s.readTimeout = readTimeout
-	}
-	if idleTimeout > 0 {
-		s.idleTimeout = idleTimeout
-	}
 }

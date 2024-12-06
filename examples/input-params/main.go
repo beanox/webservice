@@ -19,8 +19,13 @@ func main() {
 }
 
 // New creates App instance
-func New() webservice.SimpleService {
-	return webservice.NewSimpleService(&inputParamService{})
+func New() webservice.WebService {
+	return webservice.New(
+		&inputParamService{},
+		webservice.WithBuildInfo(webservice.BuildInfo{
+			Version: "1.0.0",
+		}),
+	)
 }
 
 func (s *inputParamService) PreparePFlags() (err error) {
@@ -28,7 +33,7 @@ func (s *inputParamService) PreparePFlags() (err error) {
 	pflag.Bool("enable_cors", false, "Enable cors for all domains")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	// set default value from config / env variable
-	viper.SetDefault("sap.werk", "1000") // Environment varaible is SAP_WERK
+	viper.SetDefault("sap.werk", "1000") // Environment variable is SAP_WERK
 	return
 }
 

@@ -11,11 +11,13 @@ type testService struct {
 
 func main() {
 	svc := New()
-	svc.SetTimeouts(time.Second*60, time.Second*60, 0)
 	svc.Start()
 }
 
 // New creates App instance
-func New() webservice.SimpleService {
-	return webservice.NewSimpleService(&testService{})
+func New() webservice.WebService {
+	return webservice.New(
+		&testService{},
+		webservice.WithTimeouts(time.Second*60, time.Second*60, 0),
+	)
 }

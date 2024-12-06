@@ -18,8 +18,8 @@ func main() {
 }
 
 // New creates App instance
-func New() webservice.SimpleService {
-	return webservice.NewSimpleService(&customRoutesService{})
+func New() webservice.WebService {
+	return webservice.New(&customRoutesService{})
 }
 
 func (s *customRoutesService) ConfigureRouter(router *mux.Router) (handler http.Handler, err error) {
