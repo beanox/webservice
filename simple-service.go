@@ -37,10 +37,11 @@ type WebServiceObject interface {
 
 // BuildInfo represents build information for the service
 type BuildInfo struct {
-	Name      string `json:"name,omitempty"`
-	Version   string `json:"version,omitempty"`
-	BuildTime string `json:"build_time,omitempty"`
-	CommitSHA string `json:"commit_sha,omitempty"`
+	Name          string `json:"name,omitempty"`
+	Version       string `json:"version,omitempty"`
+	BuildTime     string `json:"build_time,omitempty"`
+	CommitSHA     string `json:"commit_sha,omitempty"`
+	PreferLdflags bool   `json:"-"`
 }
 
 type Timeouts struct {
@@ -91,18 +92,34 @@ func WithTimeouts(write, read, idle time.Duration) WebServiceOption {
 // WithBuildInfo sets the build information
 func WithBuildInfo(bi BuildInfo) WebServiceOption {
 	return func(c *Config) {
+		if bi.PreferLdflags {
 
-		if bi.Name != "" {
-			c.buildInfo.Name = bi.Name
-		}
-		if bi.Version != "" {
-			c.buildInfo.Version = bi.Version
-		}
-		if bi.BuildTime != "" {
-			c.buildInfo.BuildTime = bi.BuildTime
-		}
-		if bi.CommitSHA != "" {
-			c.buildInfo.CommitSHA = bi.CommitSHA
+			if c.buildInfo.Name == "" && bi.Name != "" {
+				c.buildInfo.Name = bi.Name
+			}
+			if c.buildInfo.Version == "" && bi.Version != "" {
+				c.buildInfo.Version = bi.Version
+			}
+			if c.buildInfo.BuildTime == "" && bi.BuildTime != "" {
+				c.buildInfo.BuildTime = bi.BuildTime
+			}
+			if c.buildInfo.CommitSHA == "" && bi.CommitSHA != "" {
+				c.buildInfo.CommitSHA = bi.CommitSHA
+			}
+		} else {
+
+			if bi.Name != "" {
+				c.buildInfo.Name = bi.Name
+			}
+			if bi.Version != "" {
+				c.buildInfo.Version = bi.Version
+			}
+			if bi.BuildTime != "" {
+				c.buildInfo.BuildTime = bi.BuildTime
+			}
+			if bi.CommitSHA != "" {
+				c.buildInfo.CommitSHA = bi.CommitSHA
+			}
 		}
 	}
 }
