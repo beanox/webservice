@@ -180,6 +180,10 @@ type WebServiceGetStatusHandler interface {
 	GetServerStatus() (status interface{})
 }
 
+type WebServiceUserValidator interface {
+	ValidateUser(userInfo *authorization.UserInfo) (valid bool)
+}
+
 // WebServiceBase ...
 type WebServiceBase struct {
 	obj    WebServiceObject
@@ -379,7 +383,13 @@ func (s *WebServiceBase) Start() (err error) {
 	handler = logging.New(logrus.WithField("facility", "webservice")).Middleware(handler)
 
 	// Authorization
-	authMw := authorization.New(authorization.OptionsFromViper("authorization."))
+
+	var userValidatorFunc func(userInfo *authorization.UserInfo) bool
+	if userValidator, ok := s.obj.(WebServiceUserValidator); ok {
+		userValidatorFunc = userValidator.ValidateUser
+	}
+
+	authMw := authorization.New(authorization.OptionsFromViper("authorization."), userValidatorFunc)
 	handler = authMw.Middleware(handler)
 	err = authMw.Validate()
 	if err != nil {

@@ -2,6 +2,7 @@ package authorization
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/rsa"
 	"fmt"
 	"net/http"
@@ -11,15 +12,17 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/spf13/viper"
 
+	"github.com/lestrrat-go/jwx/jwa"
 	"github.com/lestrrat-go/jwx/jwk"
 	"github.com/sirupsen/logrus"
 )
 
 // UserInfo information about authenticated user
 type UserInfo struct {
-	UserID string   `json:"uid,omitempty"`
-	Email  string   `json:"email,omitempty"`
-	Scopes []string `json:"scopes,omitempty"`
+	UserID string        `json:"uid,omitempty"`
+	Email  string        `json:"email,omitempty"`
+	Scopes []string      `json:"scopes,omitempty"`
+	Claims jwt.MapClaims `json:"claims,omitempty"`
 }
 
 var userWithInvalidToken = &UserInfo{UserID: "_invalid_token_"}
@@ -44,7 +47,7 @@ const (
 )
 
 // AppHandler is handler that will fail if user is not authorized (based on token + required scope)
-type AppHandler func(w http.ResponseWriter, r *http.Request, userInfo *UserInfo) error
+type AppHandler func(w http.ResponseWriter, r *http.Request, userInfo *UserInfo) (err error)
 
 // Satisfies the http.Handler interface
 func (ah AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -112,6 +115,7 @@ type Authorization struct {
 	invalidTokenIsAnonymous bool
 	invalidScopeIsAnonymous bool
 	disabled                bool
+	userValidator           func(userInfo *UserInfo) bool
 }
 
 // Middleware returns middleware function that can be used in router.Use()
@@ -154,13 +158,20 @@ func (a *Authorization) Middleware(h http.Handler) (handler http.Handler) {
 						}
 
 						key, keyFound := jwks.LookupKeyID(keyID)
-
 						if keyFound {
-							var publicKey rsa.PublicKey
-							err := key.Raw(&publicKey)
-							return &publicKey, err
+							alg := key.Algorithm()
+							if alg == string(jwa.RS256) {
+								var publicKey rsa.PublicKey
+								err := key.Raw(&publicKey)
+								return &publicKey, err
+							} else if alg == string(jwa.ES256) {
+								var publicKey ecdsa.PublicKey
+								err := key.Raw(&publicKey)
+								return &publicKey, err
+							} else {
+								return nil, fmt.Errorf("unsupported algorithm %s", alg)
+							}
 						}
-
 						return nil, fmt.Errorf("unable to find key with id: %s", keyID)
 					})
 
@@ -195,12 +206,19 @@ func (a *Authorization) Middleware(h http.Handler) (handler http.Handler) {
 									UserID: uid,
 									Email:  mail,
 									Scopes: scopes,
+									Claims: claims,
 								}
 
 								// Check permissions
-								if a.requiredScope != "" && a.requiredScope != "*" &&
-									!userInfo.HasScope(a.requiredScope) && !userInfo.HasScope("*") {
-									userInfo = userWithInvalidScope
+								if a.userValidator != nil {
+									if !a.userValidator(userInfo) {
+										userInfo = userWithInvalidScope
+									}
+								} else {
+									if a.requiredScope != "" && a.requiredScope != "*" &&
+										!userInfo.HasScope(a.requiredScope) && !userInfo.HasScope("*") {
+										userInfo = userWithInvalidScope
+									}
 								}
 							}
 						}
@@ -229,11 +247,11 @@ type Options struct {
 	// Required scope that needs to be present in token. If given scope is not present
 	// request will be denied. Scope '*' can be set and means any - only key must match.
 	RequiredScope string
-	// Allowes anonymous user - user without token. User info will be null
+	// Allows anonymous user - user without token. User info will be null
 	AllowAnonymous bool
 	// Way how to treat invalid user token: anonymous or unauthorized
 	InvalidTokenIsAnonymous bool
-	// Way how to treat users without valid scope: anonymous or unauthorized
+	// Way how to treat users without valid scope: anonymous or unauthorized©
 	InvalidScopeIsAnonymous bool
 	// Disable authorization - it will allow all requests and UserInfo will be always nil
 	Disabled bool
@@ -251,7 +269,7 @@ func OptionsFromViper(prefix string) (options Options) {
 }
 
 // New create new AuthMiddleware object
-func New(options Options) (a *Authorization) {
+func New(options Options, userValidator func(userInfo *UserInfo) bool) (a *Authorization) {
 	a = &Authorization{
 		jwks:                    options.Jwks,
 		jwksURL:                 options.JwksURL,
@@ -260,6 +278,7 @@ func New(options Options) (a *Authorization) {
 		invalidTokenIsAnonymous: options.InvalidTokenIsAnonymous,
 		invalidScopeIsAnonymous: options.InvalidScopeIsAnonymous,
 		disabled:                options.Disabled,
+		userValidator:           userValidator,
 	}
 
 	if a.requiredScope == "" {
